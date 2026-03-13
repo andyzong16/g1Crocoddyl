@@ -9,8 +9,8 @@ import os
 def main():
     # Load robot
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    urdf_path = os.path.join(script_dir, "model", "T1_7dof_arms_with_gripper.urdf")
-    package_dir = os.path.join(script_dir, "model")
+    urdf_path = os.path.join(script_dir, "/home/nzong8/crocoddyl/unitree_ros/robots/g1_description/g1_29dof_rev_1_0.urdf")
+    package_dir = os.path.join(script_dir, "/home/nzong8/crocoddyl/unitree_ros/robots/g1_description/meshes")
 
     robot = pinocchio.RobotWrapper.BuildFromURDF(
         urdf_path,

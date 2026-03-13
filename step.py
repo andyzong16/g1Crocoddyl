@@ -56,7 +56,7 @@ class SimpleBipedGaitProblem:
 
         # Collision avoidance: Define important frame pairs to monitor
         self.collision_pairs = [
-            ("left_foot_link", "right_foot_link"),  # Feet shouldn't collide
+            ("left_ankle_roll_link", "right_ankle_roll_link"),  # Feet shouldn't collide
         ]
         self.collision_min_distance = 0.1  # 10cm minimum distance
         print(f"[Collision Avoidance] Enabled with min distance: {self.collision_min_distance}m")

@@ -56,9 +56,13 @@ SOLVER_THRESHOLD = 1e-7
 
 def load_robot():
     """Load the robot model and set up initial configuration."""
+    
+    g1_urdf = "/home/nzong8/crocoddyl/unitree_ros/robots/g1_description/g1_29dof_rev_1_0.urdf"
+    g1_mesh = "/home/nzong8/crocoddyl/unitree_ros/robots/g1_description/"
+    
     robot = pinocchio.RobotWrapper.BuildFromURDF(
-        "model/T1_7dof_arms_with_gripper.urdf",
-        package_dirs=["model"],
+        g1_urdf,
+        [g1_mesh],
         root_joint=pinocchio.JointModelFreeFlyer(),
     )
 
@@ -485,8 +489,8 @@ def main():
     x0 = np.concatenate([q0, v0])
 
     # Get initial foot positions
-    rightFoot = "right_foot_link"
-    leftFoot = "left_foot_link"
+    rightFoot = "right_ankle_roll_link"
+    leftFoot = "left_ankle_roll_link"
 
     rdata = robot.model.createData()
     pinocchio.forwardKinematics(robot.model, rdata, q0)

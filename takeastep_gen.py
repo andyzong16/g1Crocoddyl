@@ -14,21 +14,61 @@ WITHDISPLAY = True
 WITHPLOT = "plot" in sys.argv or "CROCODDYL_PLOT" in os.environ
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
+g1_urdf = "/home/nzong8/crocoddyl/unitree_ros/robots/g1_description/g1_29dof_rev_1_0.urdf"
+g1_mesh = "/home/nzong8/crocoddyl/unitree_ros/robots/g1_description/"
+
 robot = pinocchio.RobotWrapper.BuildFromURDF(
-    "model/T1_7dof_arms_with_gripper.urdf",
-    package_dirs=["model"],
+    g1_urdf,
+    [g1_mesh],
     root_joint=pinocchio.JointModelFreeFlyer()
 )
+
 print("Joint names:", [robot.model.names[i] for i in range(robot.model.njoints)])
 half_sitting = np.array([
-    0, 0, 0.665,  # base position
-    0, 0, 0, 1,   # base orientation (quaternion)
-    0, 0,         # torso joints
-    0.2, -1.35, 0, -0.5, 0.0, 0.0, 0.0,  # left arm
-    0.2, 1.35, 0, 0.5, 0.0, 0.0, 0.0,    # right arm
-    0,            # head
-    -0.2, 0, 0, 0.4, -0.25, 0,  # left leg
-    -0.2, 0, 0, 0.4, -0.25, 0   # right leg
+    # base position
+    0.0, 0.0, 0.72,
+
+    # base orientation quaternion
+    0.0, 0.0, 0.0, 1.0,
+
+    # LEFT LEG
+    -0.25,   # hip_pitch
+    0.0,     # hip_roll
+    0.0,     # hip_yaw
+    0.50,    # knee
+    -0.25,   # ankle_pitch
+    0.0,     # ankle_roll
+
+    # RIGHT LEG
+    -0.25,
+    0.0,
+    0.0,
+    0.50,
+    -0.25,
+    0.0,
+
+    # WAIST
+    0.0,  # yaw
+    0.0,  # roll
+    0.0,  # pitch
+
+    # LEFT ARM
+    0.25,   # shoulder_pitch
+    0.15,   # shoulder_roll
+    0.0,    # shoulder_yaw
+    -0.5,   # elbow
+    0.0,
+    0.0,
+    0.0,
+
+    # RIGHT ARM
+    0.25,
+    -0.15,
+    0.0,
+    -0.5,
+    0.0,
+    0.0,
+    0.0
 ])
 robot.model.referenceConfigurations["half_sitting"] = half_sitting
 
@@ -38,13 +78,11 @@ v0 = pinocchio.utils.zero(robot.model.nv)
 x0 = np.concatenate([q0, v0])
 print(x0.shape)
 
-
-rightFoot = "left_foot_link"
-leftFoot = "right_foot_link"
+rightFoot = "right_ankle_roll_link"
+leftFoot = "left_ankle_roll_link"
 gait = SimpleBipedGaitProblem(
     robot.model, rightFoot, leftFoot, fwddyn=False
 )
-
 
 def extract_com_trajectory(robot, solver):
     """Extract COM position from solver trajectory."""
@@ -152,11 +190,9 @@ print(f"  Left foot ({leftFoot}): {lfPos0}")
 NUM_KNOTS = 30
 GAITPHASES = [
     {
-        "singlestep": {
-            # Move left foot forward 30cm
-            "leftFootTarget": lfPos0,
-            # Keep right foot in place
-            "rightFootTarget": rfPos0 + np.array([0.15, 0.05, 0.0]),
+        "walking": {
+            "stepLength": 0.3,
+            "stepHeight": 0.1,
             "timeStep": 1.0 / 1.2 / NUM_KNOTS,
             "stepKnots": NUM_KNOTS,
             "supportKnots": 10,
@@ -172,16 +208,19 @@ for i, phase in enumerate(GAITPHASES):
             print("\n*** Creating single step problem ***")
             print(f"  Left foot target: {value['leftFootTarget']}")
             print(f"  Right foot target: {value['rightFootTarget']}")
-            solver[i] = crocoddyl.SolverIntro(
-                gait.createSingleStepProblem(
-                    x0,
-                    value["leftFootTarget"],
-                    value["rightFootTarget"],
-                    value["timeStep"],
-                    value["stepKnots"],
-                    value["supportKnots"],
-                )
+            
+            shooting_problem = gait.createSingleStepProblem(
+                x0,
+                value["leftFootTarget"],
+                value["rightFootTarget"],
+                value["timeStep"],
+                value["stepKnots"],
+                value["supportKnots"],
             )
+            # add_arm_regularization(shooting_problem, robot.model, x0, actuation.nu, weight=1e2)
+            # add_angular_momentum_cost(shooting_problem, state_mb, actuation.nu, weight=1e1)
+            solver[i] = crocoddyl.SolverIntro(shooting_problem)
+            
         elif key == "walking":
             # Creating a walking problem
             solver[i] = crocoddyl.SolverIntro(
@@ -231,8 +270,8 @@ for i, phase in enumerate(GAITPHASES):
     # Extract and plot COM trajectory
     print("\nExtracting COM trajectory for plotting...")
     com_traj = extract_com_trajectory(robot, solver[i])
-    lf_traj = extract_foot_positions(robot, solver[i], "left_foot_link")
-    rf_traj = extract_foot_positions(robot, solver[i], "right_foot_link")
+    lf_traj = extract_foot_positions(robot, solver[i], "left_ankle_roll_link")
+    rf_traj = extract_foot_positions(robot, solver[i], "right_ankle_roll_link")
 
     phase_name = next(iter(GAITPHASES[i].keys()))
     fig = plot_com_trajectory(com_traj, lf_traj, rf_traj, phase_name=phase_name)
