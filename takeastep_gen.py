@@ -8,7 +8,7 @@ import pinocchio
 import matplotlib.pyplot as plt
 
 import crocoddyl
-from step import SimpleBipedGaitProblem
+from g1CrocoddylDigit.utils.g1_jumping_turn_250415 import SimpleBipedGaitProblem
 
 WITHDISPLAY = True
 WITHPLOT = "plot" in sys.argv or "CROCODDYL_PLOT" in os.environ
@@ -26,63 +26,33 @@ robot = pinocchio.RobotWrapper.BuildFromURDF(
 print("Joint names:", [robot.model.names[i] for i in range(robot.model.njoints)])
 half_sitting = np.array([
     # base position
-    0.0, 0.0, 0.72,
-
+    0.0, 0.0, 0.60,
     # base orientation quaternion
     0.0, 0.0, 0.0, 1.0,
-
     # LEFT LEG
-    -0.25,   # hip_pitch
-    0.0,     # hip_roll
-    0.0,     # hip_yaw
-    0.50,    # knee
-    -0.25,   # ankle_pitch
-    0.0,     # ankle_roll
-
+    -0.5, 0.0, 0.0, 1.0, -0.5, 0.0,
     # RIGHT LEG
-    -0.25,
-    0.0,
-    0.0,
-    0.50,
-    -0.25,
-    0.0,
-
+    -0.5, 0.0, 0.0, 1.0, -0.5, 0.0,
     # WAIST
-    0.0,  # yaw
-    0.0,  # roll
-    0.0,  # pitch
-
+    0.0, 0.0, 0.1,
     # LEFT ARM
-    0.25,   # shoulder_pitch
-    0.15,   # shoulder_roll
-    0.0,    # shoulder_yaw
-    -0.5,   # elbow
-    0.0,
-    0.0,
-    0.0,
-
+    0.1, 0.15, 0.0, -0.3, 0.0, 0.0, 0.0,
     # RIGHT ARM
-    0.25,
-    -0.15,
-    0.0,
-    -0.5,
-    0.0,
-    0.0,
-    0.0
+    0.1, -0.15, 0.0, -0.3, 0.0, 0.0, 0.0,
 ])
 robot.model.referenceConfigurations["half_sitting"] = half_sitting
 
 # Defining the initial state of the robot
-q0 = robot.model.referenceConfigurations["half_sitting"].copy()
-v0 = pinocchio.utils.zero(robot.model.nv)
-x0 = np.concatenate([q0, v0])
-print(x0.shape)
 
+rightHand = "right_rubber_hand"
+leftHand  = "left_rubber_hand"
 rightFoot = "right_ankle_roll_link"
 leftFoot = "left_ankle_roll_link"
 gait = SimpleBipedGaitProblem(
-    robot.model, rightFoot, leftFoot, fwddyn=False
+    robot.model, rightHand, leftHand, rightFoot, leftFoot, fwddyn=True
 )
+
+x0 = gait.x0.copy()
 
 def extract_com_trajectory(robot, solver):
     """Extract COM position from solver trajectory."""
@@ -187,15 +157,18 @@ print(f"  Right foot ({rightFoot}): {rfPos0}")
 print(f"  Left foot ({leftFoot}): {lfPos0}")
 
 # Setting up all tasks with explicit foot targets
-NUM_KNOTS = 30
 GAITPHASES = [
     {
-        "walking": {
-            "stepLength": 0.3,
-            "stepHeight": 0.1,
-            "timeStep": 1.0 / 1.2 / NUM_KNOTS,
-            "stepKnots": NUM_KNOTS,
-            "supportKnots": 10,
+        "jumping": {
+            "jumpHeight":       0.35,
+            "jumpLength":       0.3,
+            "residual":         0.05,
+            "jumpingangle":     np.radians(0),   
+            "timeStep":         0.01,            
+            "standingKnots":    10,
+            "pretakeoffKnots":  30,
+            "groundKnots":      15,
+            "flyingKnots":      30,
         }
     },
 ]
@@ -203,49 +176,22 @@ GAITPHASES = [
 solver = [None] * len(GAITPHASES)
 for i, phase in enumerate(GAITPHASES):
     for key, value in phase.items():
-        if key == "singlestep":
-            # Creating a single step problem with explicit foot targets
-            print("\n*** Creating single step problem ***")
-            print(f"  Left foot target: {value['leftFootTarget']}")
-            print(f"  Right foot target: {value['rightFootTarget']}")
-            
-            shooting_problem = gait.createSingleStepProblem(
-                x0,
-                value["leftFootTarget"],
-                value["rightFootTarget"],
-                value["timeStep"],
-                value["stepKnots"],
-                value["supportKnots"],
-            )
-            # add_arm_regularization(shooting_problem, robot.model, x0, actuation.nu, weight=1e2)
-            # add_angular_momentum_cost(shooting_problem, state_mb, actuation.nu, weight=1e1)
-            solver[i] = crocoddyl.SolverIntro(shooting_problem)
-            
-        elif key == "walking":
-            # Creating a walking problem
-            solver[i] = crocoddyl.SolverIntro(
-                gait.createWalkingProblem(
-                    x0,
-                    value["stepLength"],
-                    value["stepHeight"],
-                    value["timeStep"],
-                    value["stepKnots"],
-                    value["supportKnots"],
-                )
-            )
-        elif key == "jumping":
-            # Creating a jumping problem
-            solver[i] = crocoddyl.SolverIntro(
+        if key == "jumping":
+            solver[i] = crocoddyl.SolverFDDP(
                 gait.createJumpingProblem(
                     x0,
                     value["jumpHeight"],
                     value["jumpLength"],
+                    value["residual"],
+                    value["jumpingangle"],
                     value["timeStep"],
+                    value["standingKnots"],
+                    value["pretakeoffKnots"],
                     value["groundKnots"],
                     value["flyingKnots"],
                 )
             )
-        solver[i].th_stop = 1e-7
+    solver[i].th_stop = 1e-7
 
     # Added the callback functions
     print("*** SOLVE " + key + " ***")
@@ -262,7 +208,7 @@ for i, phase in enumerate(GAITPHASES):
     # Solving the problem with the solver
     xs = [x0] * (solver[i].problem.T + 1)
     us = solver[i].problem.quasiStatic([x0] * solver[i].problem.T)
-    solver[i].solve(xs, us, 100, False)
+    solver[i].solve(xs, us, 500, False)
 
     # Defining the final state as initial one for the next phase
     x0 = solver[i].xs[-1]
@@ -279,33 +225,22 @@ for i, phase in enumerate(GAITPHASES):
     print(f"Saved plot: com_trajectory_{i}_{phase_name}.png")
     plt.close(fig)
 
-
 # Export trajectories to npz
-q_trajectory = []
+q_trajectory         = []
 root_pose_trajectory = []
-phase_trajectory = []
 
-for i, phase_dict in enumerate(GAITPHASES):
-    phase_name = next(iter(phase_dict.keys()))
+for i in range(len(GAITPHASES)):
     for xs in solver[i].xs:
-        q = xs[:robot.model.nq]
-
-        # extract root pose (xyz + quaternion)
-        root_pos = q[:3]  # xyz
-        root_quat = q[3:7]  # xyzw in pinocchio
-        # convert pinocchio quaternion (x,y,z,w) to xyz_wxyz format
-        root_pose = np.concatenate([root_pos, [root_quat[3]], root_quat[:3]])
-
-        # extract joint positions (without base)
-        q_joints = q[7:]
-
-        q_trajectory.append(q_joints)
+        q         = xs[:robot.model.nq]
+        root_pos  = q[:3]
+        root_quat = q[3:7]
+        root_pose = np.concatenate([[root_quat[3]], root_quat[:3], root_pos])
+        q_trajectory.append(q[7:])
         root_pose_trajectory.append(root_pose)
-        phase_trajectory.append(i)
 
-q_trajectory = np.array(q_trajectory)
+q_trajectory         = np.array(q_trajectory)
 root_pose_trajectory = np.array(root_pose_trajectory)
-phase_trajectory = np.linspace(0.0, 1.0, num=q_trajectory.shape[0])
+phase_trajectory     = np.linspace(0.0, 1.0, num=q_trajectory.shape[0])
 
 np.savez(
     "trajectory.npz",
